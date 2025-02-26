@@ -1,0 +1,186 @@
+{
+    "meta": {
+      "name": "image_encoder",
+      "description": "Image encoder model with CNN architecture"
+    },
+    "parameters": [
+      {
+        "name": "input_channels",
+        "default": 3
+      },
+      {
+        "name": "base_filters",
+        "default": 64
+      },
+      {
+        "name": "filter_multiplier",
+        "default": 2
+      },
+      {
+        "name": "latent_dim",
+        "default": 512
+      },
+      {
+        "name": "stage2_filters",
+        "relative_to": ["base_filters", "*", "filter_multiplier"],
+        "default": 128
+      },
+      {
+        "name": "stage3_filters",
+        "relative_to": ["stage2_filters", "*", "filter_multiplier"],
+        "default": 256
+      },
+      {
+        "name": "image_size",
+        "default": 224
+      }
+    ],
+    "model": [
+      {
+        "name": "encoder_stage1",
+        "layers": [
+          ["conv2d", "input_channels", "base_filters", 3],
+          ["batchnorm2d", "base_filters"],
+          ["relu"],
+          ["maxpool2d", 2]
+        ]
+      },
+      {
+        "name": "encoder_stage2",
+        "layers": [
+          ["conv2d", "base_filters", "stage2_filters", 3],
+          ["batchnorm2d", "stage2_filters"],
+          ["relu"],
+          ["maxpool2d", 2]
+        ]
+      },
+      {
+        "name": "encoder_stage3",
+        "layers": [
+          ["conv2d", "stage2_filters", "stage3_filters", 3],
+          ["batchnorm2d", "stage3_filters"],
+          ["relu"],
+          ["maxpool2d", 2]
+        ]
+      },
+      {
+        "name": "flatten",
+        "layers": [
+          ["flatten"]
+        ]
+      },
+      {
+        "name": "latent_encoder",
+        "layers": [
+          ["linear", ["stage3_filters", "*", 28], "latent_dim"],
+          ["relu"],
+          ["dropout", 0.3]
+        ]
+      }
+    ],
+    "trainings": [
+      {
+        "name": "train_autoencoder",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "encoded",
+            "type": "latent_vector"
+          }
+        ],
+        "optimizer": "adam",
+        "losses": [
+          {
+            "function": "mse",
+            "output": "encoded",
+            "weight": 1.0
+          }
+        ]
+      },
+      {
+        "name": "train_classifier",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "class",
+            "type": "class_output"
+          }
+        ],
+        "optimizer": "adam",
+        "losses": [
+          {
+            "function": "cross_entropy",
+            "output": "class",
+            "weight": 1.0
+          }
+        ]
+      }
+    ],
+    "inferences": [
+      {
+        "name": "encode_image",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "encoded",
+            "type": "latent_vector"
+          }
+        ]
+      },
+      {
+        "name": "classify_image",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "class",
+            "type": "class_output"
+          },
+          {
+            "name": "confidence",
+            "type": "confidence_score"
+          }
+        ]
+      }
+    ],
+    "type_definition": [
+      {
+        "name": "image_input",
+        "processor": "image_processor",
+        "size": [224, 224],
+        "normalize": true
+      },
+      {
+        "name": "latent_vector",
+        "output_processor": "vector_normalizer"
+      },
+      {
+        "name": "class_output",
+        "output_processor": "vector_to_class",
+        "classes": ["class1", "class2", "class3", "class4", "class5"]
+      },
+      {
+        "name": "confidence_score",
+        "output_processor": "identity"
+      }
+    ]
+  }

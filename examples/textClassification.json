@@ -1,0 +1,119 @@
+{
+    "meta": {
+      "name": "text_classifier",
+      "description": "Simple text classification model for sentiment analysis"
+    },
+    "parameters": [
+      {
+        "name": "vocab_size",
+        "default": 10000
+      },
+      {
+        "name": "embedding_dim",
+        "default": 128
+      },
+      {
+        "name": "hidden_dim",
+        "default": 256
+      },
+      {
+        "name": "num_classes",
+        "default": 3
+      },
+      {
+        "name": "dropout_rate",
+        "default": 0.2
+      },
+      {
+        "name": "sequence_length",
+        "default": 100
+      }
+    ],
+    "model": [
+      {
+        "name": "embedding_layer",
+        "layers": [
+          ["embedding", "vocab_size", "embedding_dim"]
+        ]
+      },
+      {
+        "name": "encoder",
+        "layers": [
+          ["lstm", "embedding_dim", "hidden_dim", 2, true],
+          ["dropout", "dropout_rate"]
+        ]
+      },
+      {
+        "name": "classifier",
+        "layers": [
+          ["linear", "hidden_dim", ["hidden_dim", "/", 2]],
+          ["relu"],
+          ["dropout", "dropout_rate"],
+          ["linear", ["hidden_dim", "/", 2], "num_classes"],
+          ["softmax"]
+        ]
+      }
+    ],
+    "trainings": [
+      {
+        "name": "train_sentiment",
+        "input": [
+          {
+            "name": "text",
+            "type": "text_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "sentiment",
+            "type": "class_label"
+          }
+        ],
+        "optimizer": "adam",
+        "losses": [
+          {
+            "function": "cross_entropy",
+            "output": "sentiment",
+            "weight": 1.0
+          }
+        ]
+      }
+    ],
+    "inferences": [
+      {
+        "name": "predict_sentiment",
+        "input": [
+          {
+            "name": "text",
+            "type": "text_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "sentiment",
+            "type": "class_label"
+          },
+          {
+            "name": "confidence",
+            "type": "probability"
+          }
+        ]
+      }
+    ],
+    "type_definition": [
+      {
+        "name": "text_input",
+        "processor": "text_tokenizer",
+        "max_length": 100
+      },
+      {
+        "name": "class_label",
+        "output_processor": "vector_to_class",
+        "classes": ["negative", "neutral", "positive"]
+      },
+      {
+        "name": "probability",
+        "output_processor": "identity"
+      }
+    ]
+  }

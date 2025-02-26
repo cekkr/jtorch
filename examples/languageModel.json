@@ -1,0 +1,231 @@
+{
+    "meta": {
+      "name": "language_model",
+      "description": "Transformer-based language model for text generation"
+    },
+    "parameters": [
+      {
+        "name": "vocab_size",
+        "default": 30000
+      },
+      {
+        "name": "embedding_dim",
+        "default": 768
+      },
+      {
+        "name": "hidden_dim",
+        "default": 768
+      },
+      {
+        "name": "num_heads",
+        "default": 12
+      },
+      {
+        "name": "num_layers",
+        "default": 6
+      },
+      {
+        "name": "dropout_rate",
+        "default": 0.1
+      },
+      {
+        "name": "max_sequence_length",
+        "default": 512
+      },
+      {
+        "name": "intermediate_size",
+        "relative_to": ["hidden_dim", "*", 4],
+        "default": 3072
+      }
+    ],
+    "model": [
+      {
+        "name": "token_embedding",
+        "layers": [
+          ["embedding", "vocab_size", "embedding_dim"]
+        ]
+      },
+      {
+        "name": "position_embedding",
+        "layers": [
+          ["embedding", "max_sequence_length", "embedding_dim"]
+        ]
+      },
+      {
+        "name": "transformer_1",
+        "layers": [
+          ["attention", "embedding_dim", "num_heads"],
+          ["dropout", "dropout_rate"],
+          ["linear", "embedding_dim", "intermediate_size"],
+          ["relu"],
+          ["linear", "intermediate_size", "embedding_dim"],
+          ["layernorm", "embedding_dim"]
+        ]
+      },
+      {
+        "name": "transformer_2",
+        "layers": [
+          ["attention", "embedding_dim", "num_heads"],
+          ["dropout", "dropout_rate"],
+          ["linear", "embedding_dim", "intermediate_size"],
+          ["relu"],
+          ["linear", "intermediate_size", "embedding_dim"],
+          ["layernorm", "embedding_dim"]
+        ]
+      },
+      {
+        "name": "transformer_3",
+        "layers": [
+          ["attention", "embedding_dim", "num_heads"],
+          ["dropout", "dropout_rate"],
+          ["linear", "embedding_dim", "intermediate_size"],
+          ["relu"],
+          ["linear", "intermediate_size", "embedding_dim"],
+          ["layernorm", "embedding_dim"]
+        ]
+      },
+      {
+        "name": "lm_head",
+        "layers": [
+          ["linear", "embedding_dim", "vocab_size"]
+        ]
+      }
+    ],
+    "trainings": [
+      {
+        "name": "train_masked_lm",
+        "input": [
+          {
+            "name": "input_ids",
+            "type": "token_ids"
+          },
+          {
+            "name": "attention_mask",
+            "type": "attention_mask"
+          },
+          {
+            "name": "position_ids",
+            "type": "position_ids"
+          }
+        ],
+        "output": [
+          {
+            "name": "logits",
+            "type": "token_logits"
+          }
+        ],
+        "optimizer": "adam",
+        "losses": [
+          {
+            "function": "cross_entropy",
+            "output": "logits",
+            "weight": 1.0
+          }
+        ]
+      },
+      {
+        "name": "train_causal_lm",
+        "input": [
+          {
+            "name": "input_ids",
+            "type": "token_ids"
+          },
+          {
+            "name": "attention_mask",
+            "type": "attention_mask"
+          }
+        ],
+        "output": [
+          {
+            "name": "logits",
+            "type": "token_logits"
+          }
+        ],
+        "optimizer": "adam",
+        "losses": [
+          {
+            "function": "cross_entropy",
+            "output": "logits",
+            "weight": 1.0
+          }
+        ]
+      }
+    ],
+    "inferences": [
+      {
+        "name": "generate_text",
+        "input": [
+          {
+            "name": "prompt",
+            "type": "text_input"
+          },
+          {
+            "name": "max_length",
+            "type": "generation_param"
+          },
+          {
+            "name": "temperature",
+            "type": "generation_param"
+          }
+        ],
+        "output": [
+          {
+            "name": "generated_text",
+            "type": "text_output"
+          }
+        ]
+      },
+      {
+        "name": "embedding",
+        "input": [
+          {
+            "name": "text",
+            "type": "text_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "embedding",
+            "type": "embedding_vector"
+          }
+        ]
+      }
+    ],
+    "type_definition": [
+      {
+        "name": "token_ids",
+        "processor": "tokenizer",
+        "padding": "max_length",
+        "max_length": 512
+      },
+      {
+        "name": "attention_mask",
+        "processor": "attention_mask_generator"
+      },
+      {
+        "name": "position_ids",
+        "processor": "position_id_generator"
+      },
+      {
+        "name": "token_logits",
+        "output_processor": "identity"
+      },
+      {
+        "name": "text_input",
+        "processor": "text_tokenizer",
+        "max_length": 512
+      },
+      {
+        "name": "text_output",
+        "output_processor": "token_to_text"
+      },
+      {
+        "name": "embedding_vector",
+        "output_processor": "vector_normalizer"
+      },
+      {
+        "name": "generation_param",
+        "processor": "identity"
+      }
+    ]
+  }

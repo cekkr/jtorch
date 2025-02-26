@@ -1,0 +1,212 @@
+{
+    "meta": {
+      "name": "multimodal_model",
+      "description": "Model that combines text and image inputs for classification or generation"
+    },
+    "parameters": [
+      {
+        "name": "image_input_channels",
+        "default": 3
+      },
+      {
+        "name": "image_encoder_dim",
+        "default": 512
+      },
+      {
+        "name": "text_vocab_size",
+        "default": 20000
+      },
+      {
+        "name": "text_embedding_dim",
+        "default": 256
+      },
+      {
+        "name": "text_encoder_dim",
+        "default": 512
+      },
+      {
+        "name": "fusion_dim",
+        "default": 768
+      },
+      {
+        "name": "num_classes",
+        "default": 10
+      },
+      {
+        "name": "dropout_rate",
+        "default": 0.2
+      }
+    ],
+    "model": [
+      {
+        "name": "image_encoder",
+        "layers": [
+          ["conv2d", "image_input_channels", 64, 3],
+          ["batchnorm2d", 64],
+          ["relu"],
+          ["maxpool2d", 2],
+          ["conv2d", 64, 128, 3],
+          ["batchnorm2d", 128],
+          ["relu"],
+          ["maxpool2d", 2],
+          ["conv2d", 128, 256, 3],
+          ["batchnorm2d", 256],
+          ["relu"],
+          ["maxpool2d", 2],
+          ["flatten"],
+          ["linear", 4096, "image_encoder_dim"],
+          ["relu"],
+          ["dropout", "dropout_rate"]
+        ]
+      },
+      {
+        "name": "text_embedding",
+        "layers": [
+          ["embedding", "text_vocab_size", "text_embedding_dim"]
+        ]
+      },
+      {
+        "name": "text_encoder",
+        "layers": [
+          ["lstm", "text_embedding_dim", "text_encoder_dim", 2, true],
+          ["dropout", "dropout_rate"]
+        ]
+      },
+      {
+        "name": "fusion",
+        "layers": [
+          ["linear", ["image_encoder_dim", "+", "text_encoder_dim"], "fusion_dim"],
+          ["relu"],
+          ["dropout", "dropout_rate"]
+        ]
+      },
+      {
+        "name": "classifier",
+        "layers": [
+          ["linear", "fusion_dim", ["fusion_dim", "/", 2]],
+          ["relu"],
+          ["dropout", "dropout_rate"],
+          ["linear", ["fusion_dim", "/", 2], "num_classes"],
+          ["softmax"]
+        ]
+      }
+    ],
+    "trainings": [
+      {
+        "name": "train_multimodal_classifier",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          },
+          {
+            "name": "text",
+            "type": "text_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "class",
+            "type": "class_label"
+          }
+        ],
+        "optimizer": "adam",
+        "losses": [
+          {
+            "function": "cross_entropy",
+            "output": "class",
+            "weight": 1.0
+          }
+        ]
+      }
+    ],
+    "inferences": [
+      {
+        "name": "classify_multimodal",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          },
+          {
+            "name": "text",
+            "type": "text_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "class",
+            "type": "class_label"
+          },
+          {
+            "name": "confidence",
+            "type": "probability"
+          }
+        ]
+      },
+      {
+        "name": "extract_features",
+        "input": [
+          {
+            "name": "image",
+            "type": "image_input"
+          },
+          {
+            "name": "text",
+            "type": "text_input"
+          }
+        ],
+        "output": [
+          {
+            "name": "image_features",
+            "type": "feature_vector"
+          },
+          {
+            "name": "text_features",
+            "type": "feature_vector"
+          },
+          {
+            "name": "fused_features",
+            "type": "feature_vector"
+          }
+        ]
+      }
+    ],
+    "type_definition": [
+      {
+        "name": "image_input",
+        "processor": "image_processor",
+        "size": [224, 224],
+        "normalize": true
+      },
+      {
+        "name": "text_input",
+        "processor": "text_tokenizer",
+        "max_length": 100
+      },
+      {
+        "name": "class_label",
+        "output_processor": "vector_to_class",
+        "classes": [
+          "category_1", 
+          "category_2", 
+          "category_3", 
+          "category_4", 
+          "category_5",
+          "category_6",
+          "category_7",
+          "category_8",
+          "category_9",
+          "category_10"
+        ]
+      },
+      {
+        "name": "probability",
+        "output_processor": "identity"
+      },
+      {
+        "name": "feature_vector",
+        "output_processor": "vector_normalizer"
+      }
+    ]
+  }
