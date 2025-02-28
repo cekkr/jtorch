@@ -42,19 +42,106 @@ class DawnManager:
         self._load_dawn_library()
     
     def _detect_platform(self):
-        """Rileva sistema operativo e architettura"""
+        """Rileva sistema operativo, architettura CPU e GPU"""
         self.os_name = platform.system().lower()
         self.arch = platform.machine().lower()
         
-        # Mappa l'architettura per nomi comuni
+        # Mappa l'architettura CPU per nomi comuni
         if self.arch in ["x86_64", "amd64"]:
             self.arch = "x64"
         elif self.arch in ["aarch64", "arm64"]:
             self.arch = "arm64"
         
+        # Determina il tipo di GPU e il relativo backend
+        self.gpu_type = self._detect_gpu_type()
+        
         # Percorsi per i binari precompilati
-        self.bin_dir = Path(__file__).parent / "bin" / f"{self.os_name}-{self.arch}"
+        self.bin_dir = Path(__file__).parent / "bin" / f"{self.os_name}-{self.arch}-{self.gpu_type}"
         self.build_dir = Path(__file__).parent / "build"
+        
+    def _detect_gpu_type(self):
+        """Rileva il tipo di GPU disponibile nel sistema"""
+        # Inizialmente assumiamo un backend generico
+        gpu_type = "generic"
+        
+        if self.os_name == "darwin":
+            # Su macOS, utilizziamo Metal Performance Shaders (MPS)
+            gpu_type = "mps"
+        else:
+            # Per Linux e Windows dobbiamo rilevare CUDA o ROCm
+            try:
+                # Verifica la presenza di CUDA
+                if self._check_cuda_available():
+                    gpu_type = "cuda"
+                # Verifica la presenza di ROCm
+                elif self._check_rocm_available():
+                    gpu_type = "rocm"
+            except Exception as e:
+                print(f"Avviso durante il rilevamento GPU: {e}")
+                pass
+                
+        return gpu_type
+    
+    def _check_cuda_available(self):
+        """Verifica se CUDA è disponibile nel sistema"""
+        # Verifica l'esistenza di librerie CUDA
+        cuda_paths = [
+            "/usr/local/cuda/lib64/libcudart.so",  # Linux
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v*\\bin\\cudart64_*.dll",  # Windows
+        ]
+        
+        # Verifica se nvidia-smi è disponibile
+        try:
+            result = subprocess.run(
+                ["nvidia-smi"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                check=False
+            )
+            if result.returncode == 0:
+                return True
+        except FileNotFoundError:
+            pass
+        
+        # Verifica le librerie
+        for path in cuda_paths:
+            if self.os_name == "windows" and "*" in path:
+                # Per Windows, consideriamo pattern con wildcard
+                import glob
+                if glob.glob(path):
+                    return True
+            elif os.path.exists(path):
+                return True
+                
+        return False
+    
+    def _check_rocm_available(self):
+        """Verifica se ROCm è disponibile nel sistema"""
+        # Verifica l'esistenza di librerie ROCm
+        rocm_paths = [
+            "/opt/rocm/lib/librocm_smi64.so",  # Linux
+            "/opt/rocm/bin/rocm-smi",  # Utility ROCm
+        ]
+        
+        # Verifica se rocm-smi è disponibile
+        try:
+            result = subprocess.run(
+                ["rocm-smi"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                check=False
+            )
+            if result.returncode == 0:
+                return True
+        except FileNotFoundError:
+            pass
+        
+        # Verifica le librerie
+        for path in rocm_paths:
+            if os.path.exists(path):
+                return True
+                
+        return False
     
     def _load_dawn_library(self):
         """Carica la libreria Dawn, compilandola se necessario"""
@@ -95,8 +182,8 @@ class DawnManager:
             raise RuntimeError(f"Errore nel caricamento della libreria Dawn: {e}")
     
     def _compile_dawn(self):
-        """Compila Dawn per l'hardware corrente"""
-        print("Compilazione di Dawn per l'hardware corrente...")
+        """Compila Dawn per l'hardware corrente considerando il tipo di GPU"""
+        print(f"Compilazione di Dawn per {self.os_name}-{self.arch} con supporto {self.gpu_type}...")
         
         # Assicurati che la directory di build esista
         self.build_dir.mkdir(parents=True, exist_ok=True)
@@ -115,7 +202,7 @@ class DawnManager:
                 "git", "submodule", "update", "--init", "--recursive"
             ], cwd=str(dawn_src), check=True)
         
-        # Configura con CMake
+        # Opzioni di base per CMake
         cmake_args = [
             "cmake", "-B", str(self.build_dir), 
             "-S", str(dawn_src),
@@ -124,14 +211,63 @@ class DawnManager:
             "-DDAWN_ENABLE_OPENGLES=ON"
         ]
         
+        # Opzioni specifiche per il tipo di GPU
+        if self.gpu_type == "cuda":
+            # Aggiungi opzioni per abilitare il supporto CUDA
+            cmake_args.extend([
+                "-DDAWN_ENABLE_CUDA=ON",
+                "-DCMAKE_CUDA_ARCHITECTURES=all"
+            ])
+            
+            # Cerca di individuare CUDA toolkit
+            cuda_path = os.environ.get("CUDA_PATH")
+            if cuda_path:
+                cmake_args.append(f"-DCUDA_TOOLKIT_ROOT_DIR={cuda_path}")
+                
+        elif self.gpu_type == "rocm":
+            # Aggiungi opzioni per abilitare il supporto ROCm/HIP
+            cmake_args.extend([
+                "-DDAWN_ENABLE_ROCM=ON"
+            ])
+            
+            # Cerca di individuare il path di ROCm
+            rocm_path = "/opt/rocm"  # Path predefinito
+            if os.path.exists(rocm_path):
+                cmake_args.append(f"-DROCM_PATH={rocm_path}")
+                
+        elif self.gpu_type == "mps" and self.os_name == "darwin":
+            # Per macOS con Metal, abilita specificamente il backend Metal
+            cmake_args.extend([
+                "-DDAWN_ENABLE_METAL=ON",
+                "-DDAWN_USE_BUILT_DXC=ON"  # Usiamo il compilatore HLSL integrato
+            ])
+        
+        # Imposta l'architettura di compilazione
+        if self.arch == "arm64":
+            cmake_args.append("-DCMAKE_OSX_ARCHITECTURES=arm64" if self.os_name == "darwin" else "-DCMAKE_SYSTEM_PROCESSOR=aarch64")
+        
+        print(f"Configurazione CMake: {' '.join(cmake_args)}")
         subprocess.run(cmake_args, check=True)
         
         # Compila
-        subprocess.run([
+        build_args = [
             "cmake", "--build", str(self.build_dir), 
             "--config", "Release", 
             "--parallel"
-        ], check=True)
+        ]
+        
+        print(f"Esecuzione build: {' '.join(build_args)}")
+        subprocess.run(build_args, check=True)
+        
+        # Copia i binari compilati nella directory dei binari precompilati
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copia le librerie necessarie nella directory dei binari
+        lib_name = self._get_library_name()
+        src_lib = self.build_dir / lib_name
+        if src_lib.exists():
+            shutil.copy(src_lib, self.bin_dir / lib_name)
+            print(f"Libreria copiata in {self.bin_dir / lib_name}")
         
         print("Compilazione completata.")
     
@@ -148,8 +284,36 @@ class WebGPUDevice:
     def __init__(self, backend: GPUBackend = GPUBackend.AUTO):
         self.dawn_manager = DawnManager()
         self.dawn_lib = self.dawn_manager.get_library()
-        self.backend = backend
+        self.gpu_type = self.dawn_manager.gpu_type
+        
+        # Se il backend è AUTO, selezioniamo automaticamente in base al tipo di GPU
+        if backend == GPUBackend.AUTO:
+            self.backend = self._select_optimal_backend()
+        else:
+            self.backend = backend
+            
         self._initialize_device()
+    
+    def _select_optimal_backend(self) -> GPUBackend:
+        """Seleziona il backend ottimale in base al tipo di GPU rilevato"""
+        gpu_type = self.gpu_type
+        os_name = self.dawn_manager.os_name
+        
+        if gpu_type == "cuda":
+            # Per CUDA, Vulkan è generalmente la scelta migliore
+            return GPUBackend.VULKAN
+        elif gpu_type == "rocm":
+            # Per ROCm, Vulkan è la scelta migliore su Linux
+            return GPUBackend.VULKAN
+        elif gpu_type == "mps" and os_name == "darwin":
+            # Per macOS con MPS, Metal è l'unica opzione reale
+            return GPUBackend.METAL
+        elif os_name == "windows":
+            # Su Windows senza GPU specificate, D3D12 è generalmente migliore
+            return GPUBackend.D3D12
+        else:
+            # Fallback a Vulkan per la maggior parte delle altre configurazioni
+            return GPUBackend.VULKAN
     
     def _initialize_device(self):
         """Inizializza il dispositivo WebGPU"""
@@ -158,15 +322,49 @@ class WebGPUDevice:
         # utilizzerà le funzioni effettive dalle librerie Dawn
         
         # Impostazione del backend
-        backend_str = self.backend.value if self.backend != GPUBackend.AUTO else None
+        backend_str = self.backend.value
+        
+        print(f"Inizializzazione dispositivo WebGPU con backend: {backend_str} per GPU: {self.gpu_type}")
+        
+        # Opzioni specifiche per il tipo di GPU
+        adapter_options = {}
+        
+        if self.gpu_type == "cuda" and backend_str == "vulkan":
+            # Per CUDA con Vulkan, possiamo aggiungere opzioni specifiche
+            adapter_options["preferGPUAdapter"] = "NVIDIA"
+        elif self.gpu_type == "rocm" and backend_str == "vulkan":
+            # Per ROCm con Vulkan, preferiamo adattatori AMD
+            adapter_options["preferGPUAdapter"] = "AMD"
         
         # Inizializzazione del dispositivo (pseudo-codice, da implementare con API Dawn)
-        # self.device = self.dawn_lib.CreateDevice(backend_str)
+        # self.device = self.dawn_lib.CreateDevice(backend_str, adapter_options)
         # if not self.device:
         #    raise RuntimeError(f"Impossibile creare dispositivo WebGPU con backend {backend_str}")
         
         # Per ora usiamo un segnaposto
-        self.device = "dummy_device"
+        self.device = f"device_{backend_str}_{self.gpu_type}"
+        
+        # Stampa informazioni sul dispositivo
+        print(f"Dispositivo WebGPU inizializzato: {self.device}")
+        
+        # Recupera e memorizza le capacità del dispositivo
+        self.compute_capabilities = self._get_compute_capabilities()
+    
+    def _get_compute_capabilities(self):
+        """Recupera le capacità di calcolo del dispositivo"""
+        # In un'implementazione reale, questa funzione interrogherebbe
+        # il dispositivo per ottenere informazioni sulle sue capacità
+        
+        # Ritorna un dizionario con informazioni base
+        return {
+            "max_compute_workgroups": [65535, 65535, 65535],
+            "max_compute_workgroup_size": [1024, 1024, 64],
+            "max_compute_invocations_per_workgroup": 1024,
+            "max_storage_buffer_binding_size": 1 << 30,  # 1GB
+            "max_buffer_size": 1 << 30,  # 1GB
+            "backend": self.backend.value,
+            "gpu_type": self.gpu_type
+        }
     
     def create_buffer(self, data: np.ndarray, usage: str = "storage,copy_dst,copy_src"):
         """Crea un buffer WebGPU dal dato NumPy"""
